@@ -1,0 +1,42 @@
+services:
+  yupp-api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    image: yupp-2api:latest  # 指定镜像名
+    container_name: yupp-2api  # 指定容器名
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    volumes:
+      # 挂载配置文件
+      - ./yupp.json:/app/yupp.json:ro
+      - ./client_api_keys.json:/app/client_api_keys.json:ro
+      - ./model.json:/app/model.json:ro
+      # 挂载日志目录（可选）
+      - ./logs:/app/logs
+    environment:
+      - DEBUG_MODE=true
+      - PYTHONUNBUFFERED=1
+    networks:
+      - yupp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/models"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  yupp-network:
+    driver: bridge
+
+# 可选：添加卷以持久化日志
+volumes:
+  logs:
+    driver: local 
