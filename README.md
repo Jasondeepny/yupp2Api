@@ -1,20 +1,17 @@
 # Yupp2API
 
-这个项目是一个API适配器，将Yupp.ai的API转换为OpenAI兼容的API格式，使得可以在支持OpenAI API的应用中使用Yupp.ai的模型。
+This project is an API adapter that converts the Yupp.ai API into an OpenAI-compatible API format, allowing Yupp.ai's models to be used in applications that support the OpenAI API.
+## Features
+- Supports OpenAI compatible API interface
+- - Automatically rotates multiple Yupp accounts
+- Supports streaming output- Error handling and automatic retries
+- Supports reasoning output- Detailed debugging log system
+- Intelligent content filtering and deduplication mechanism
 
-## 功能特点
-- 支持OpenAI兼容的API接口
-- 自动轮换多个Yupp账户
-- 支持流式输出
-- 错误处理和自动重试
-- 支持思考过程(reasoning)输出
-- 详细的调试日志系统
-- 智能内容过滤和去重机制
-
-## 配置文件说明
+##Configuration file description
 ### yupp.json
 
-包含Yupp账户信息的JSON数组：
+JSON array containing Yupp account information：
 
 ```json
 [
@@ -26,7 +23,7 @@
 
 ### client_api_keys.json
 
-包含允许访问API的客户端密钥的JSON数组：
+A JSON array containing the client key that allows access to the API.：
 
 ```json
 [
@@ -37,7 +34,7 @@
 
 ### model.json
 
-包含支持的模型信息的JSON数组：
+A JSON array containing information about supported models.：
 
 ```json
 [
