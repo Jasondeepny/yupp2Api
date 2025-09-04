@@ -20,7 +20,7 @@ services:
       - DEBUG_MODE=${DEBUG_MODE:-false}
       - MAX_ERROR_COUNT=${MAX_ERROR_COUNT:-3}
       - ERROR_COOLDOWN=${ERROR_COOLDOWN:-300}
-      - MODEL_FILE=${MODEL_FILE:-model.json}
+      - MODEL_FILE=${MODEL_FILE:-./model/model.json}
       - PYTHONUNBUFFERED=1
       # 代理配置（可选）
       - HTTP_PROXY=${HTTP_PROXY:-}

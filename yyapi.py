@@ -191,7 +191,7 @@ def load_yupp_accounts():
 def load_yupp_models():
     """Load Yupp models from model.json, auto-fetch if file doesn't exist"""
     global YUPP_MODELS
-    model_file = os.getenv("MODEL_FILE", "model.json")
+    model_file = os.getenv("MODEL_FILE", "./model/model.json")
 
     # 检查模型文件是否存在
     if not os.path.exists(model_file):

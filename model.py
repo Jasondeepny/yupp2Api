@@ -77,7 +77,6 @@ def fetch_model_data() -> Optional[List[Dict[str, Any]]]:
             return None
 
         # 解析 JSON 响应
-        print(response.text)
         response_data = response.json()
         print("成功获取并解析JSON数据")
 
@@ -112,9 +111,6 @@ def load_fallback_data() -> List[Dict[str, Any]]:
     except json.JSONDecodeError as e:
         print(f"备用文件 JSON 解析失败: {e}")
         return []
-
-
-# 模型数据将在 main() 函数中获取
 
 
 def generate_model_tags(item: Dict[str, Any]) -> List[str]:
