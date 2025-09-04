@@ -189,9 +189,34 @@ def load_yupp_accounts():
 
 
 def load_yupp_models():
-    """Load Yupp models from model.json"""
+    """Load Yupp models from model.json, auto-fetch if file doesn't exist"""
     global YUPP_MODELS
     model_file = os.getenv("MODEL_FILE", "model.json")
+
+    # 检查模型文件是否存在
+    if not os.path.exists(model_file):
+        print(f"模型文件 {model_file} 不存在，尝试自动获取模型数据...")
+        try:
+            # 导入并调用 model.py 中的函数
+            from model import fetch_and_save_models
+
+            success = fetch_and_save_models(model_file)
+            if success:
+                print(f"成功自动获取并保存模型数据到 {model_file}")
+            else:
+                print(f"自动获取模型数据失败，将使用空的模型列表")
+                YUPP_MODELS = []
+                return
+        except ImportError as e:
+            print(f"无法导入 model.py 模块: {e}")
+            YUPP_MODELS = []
+            return
+        except Exception as e:
+            print(f"自动获取模型数据时发生错误: {e}")
+            YUPP_MODELS = []
+            return
+
+    # 加载模型文件
     try:
         with open(model_file, "r", encoding="utf-8") as f:
             YUPP_MODELS = json.load(f)
@@ -199,7 +224,7 @@ def load_yupp_models():
                 YUPP_MODELS = []
                 print(f"Warning: {model_file} should contain a list of model objects.")
                 return
-            print(f"Successfully loaded {len(YUPP_MODELS)} models.")
+            print(f"Successfully loaded {len(YUPP_MODELS)} models from {model_file}.")
     except FileNotFoundError:
         print(f"Error: {model_file} not found. Model list will be empty.")
         YUPP_MODELS = []
@@ -794,23 +819,6 @@ def main():
     if not os.getenv("YUPP_TOKENS"):
         print("Warning: YUPP_TOKENS environment variable not set.")
 
-    # 检查模型文件
-    model_file = os.getenv("MODEL_FILE", "model.json")
-    if not os.path.exists(model_file):
-        print(f"Warning: {model_file} not found. Creating a dummy file.")
-        dummy_models = [
-            {
-                "id": "claude-3.7-sonnet:thinking",
-                "name": "anthropic/claude-3.7-sonnet:thinking<>OPR",
-                "label": "Claude 3.7 Sonnet (Thinking) (OpenRouter)",
-                "publisher": "Anthropic",
-                "family": "Claude",
-            }
-        ]
-        with open(model_file, "w", encoding="utf-8") as f:
-            json.dump(dummy_models, f, indent=4)
-        print(f"Created dummy {model_file}.")
-
     # 加载配置
     load_client_api_keys()
     load_yupp_accounts()
@@ -836,6 +844,7 @@ def main():
             f"Available models: {', '.join(models[:5])}{'...' if len(models) > 5 else ''}"
         )
     else:
+        model_file = os.getenv("MODEL_FILE", "model.json")
         print(f"Yupp.ai Models: None loaded. Check {model_file}.")
     print("------------------------------------")
 

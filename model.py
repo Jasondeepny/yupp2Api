@@ -77,6 +77,7 @@ def fetch_model_data() -> Optional[List[Dict[str, Any]]]:
             return None
 
         # 解析 JSON 响应
+        print(response.text)
         response_data = response.json()
         print("成功获取并解析JSON数据")
 
@@ -204,12 +205,55 @@ def save_models_to_file(
 ) -> bool:
     """保存模型数据到文件"""
     try:
+        # 确保父目录存在
+        dir_name = os.path.dirname(filename)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+
+        # 若文件不存在则先创建
+        if not os.path.exists(filename):
+            try:
+                with open(filename, "x", encoding="utf-8") as _:
+                    pass
+                print(f"已创建文件: {filename}")
+            except FileExistsError:
+                # 并发场景下可能被其他进程创建，忽略
+                pass
+
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(models, f, indent=4, ensure_ascii=False)
         print(f"成功保存 {len(models)} 个模型到 {filename}")
         return True
     except Exception as e:
         print(f"保存文件失败: {e}")
+        return False
+
+
+def fetch_and_save_models(filename: str = "model.json") -> bool:
+    """获取并保存模型数据到指定文件"""
+    # 加载环境变量
+    load_dotenv()
+
+    print("=== 自动获取 Yupp 模型数据 ===")
+
+    # 检查必要的环境变量
+    if not os.getenv("YUPP_TOKENS"):
+        print("警告: YUPP_TOKENS 环境变量未设置，无法自动获取模型数据")
+        return False
+
+    # 获取模型数据
+    data = fetch_model_data()
+    if not data:
+        print("API 请求失败，尝试加载本地备用数据...")
+        data = load_fallback_data()
+
+    # 处理模型数据
+    if data:
+        print(f"开始处理 {len(data)} 个模型数据...")
+        processed_models = filter_and_process_models(data)
+        return save_models_to_file(processed_models, filename)
+    else:
+        print("没有可用的模型数据")
         return False
 
 

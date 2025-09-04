@@ -9,8 +9,8 @@ services:
     ports:
       - "${PORT:-8001}:${PORT:-8001}"
     volumes:
-      # 挂载模型配置文件（可配置路径）
-      - ${MODEL_FILE_PATH:-./model.json}:/app/${MODEL_FILE:-model.json}:ro
+      # 挂载模型配置目录
+      - ./model:/app/model
     environment:
       # 从 .env 文件加载环境变量
       - CLIENT_API_KEYS=${CLIENT_API_KEYS}
@@ -36,4 +36,4 @@ services:
       driver: "json-file"
       options:
         max-size: "10m"
-        max-file: "3" 
+        max-file: "3"
