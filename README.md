@@ -126,7 +126,7 @@ curl -X POST http://localhost:${PORT:-8001}/v1/chat/completions \
 cp env.example .env
 
 # 编辑配置文件，填入实际的 API 密钥和 token
-nano .env
+vi .env 
 ```
 
 ### 2. 启动服务
