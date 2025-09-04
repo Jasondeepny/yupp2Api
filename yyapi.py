@@ -3,26 +3,28 @@ import os
 import re
 import time
 import uuid
-import asyncio
 import threading
+from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, TypedDict, Union, Generator
-
 import requests
 from fastapi import FastAPI, HTTPException, Depends, Query
-
-# Configure requests to not use proxy
-requests.adapters.DEFAULT_RETRIES = 3
-import os
-
-os.environ["NO_PROXY"] = "*"
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field
-from starlette.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 
-# Yupp Account Management
+def create_requests_session():
+    """创建配置好的 requests session"""
+    session = requests.Session()
+    session.proxies = {"http": None, "https": None}
+    adapter = requests.adapters.HTTPAdapter(max_retries=3)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
 class YuppAccount(TypedDict):
     token: str
     is_valid: bool
@@ -30,17 +32,13 @@ class YuppAccount(TypedDict):
     error_count: int
 
 
-# Global variables
 VALID_CLIENT_KEYS: set = set()
 YUPP_ACCOUNTS: List[YuppAccount] = []
 YUPP_MODELS: List[Dict[str, Any]] = []
 account_rotation_lock = threading.Lock()
-MAX_ERROR_COUNT = 3
-ERROR_COOLDOWN = 300  # 5 minutes cooldown for accounts with errors
-DEBUG_MODE = True  # 默认启用调试模式
+DEBUG_MODE = False
 
 
-# Pydantic Models
 class ChatMessage(BaseModel):
     role: str
     content: Union[str, List[Dict[str, Any]]]
@@ -54,7 +52,6 @@ class ChatCompletionRequest(BaseModel):
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     top_p: Optional[float] = None
-    raw_response: bool = False  # 保留用于调试
 
 
 class ModelInfo(BaseModel):
@@ -104,19 +101,30 @@ class StreamResponse(BaseModel):
     choices: List[StreamChoice]
 
 
-# FastAPI Appai
-app = FastAPI(title="Yupp.ai OpenAI API Adapter")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用启动和关闭时的生命周期管理"""
+    # 启动时执行
+    print("Starting Yupp.ai OpenAI API Adapter server...")
+    load_client_api_keys()
+    load_yupp_accounts()
+    load_yupp_models()
+    print("Server initialization completed.")
 
-app.add_middleware(
-    TrustedHostMiddleware, allowed_hosts=["*"]  # 允许所有主机访问，或者使用具体的IP列表
-)
-# 添加CORS中间件
+    yield
+    # 关闭时执行
+    print("Server shutdown completed.")
+
+
+app = FastAPI(title="Yupp.ai OpenAI API Adapter", lifespan=lifespan)
+
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 允许所有来源
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # 允许所有方法
-    allow_headers=["*"],  # 允许所有头
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 security = HTTPBearer(auto_error=False)
 
@@ -128,71 +136,83 @@ def log_debug(message: str):
 
 
 def load_client_api_keys():
-    """Load client API keys from client_api_keys.json"""
+    """Load client API keys from environment variables"""
     global VALID_CLIENT_KEYS
-    try:
-        with open("client_api_keys.json", "r", encoding="utf-8") as f:
-            keys = json.load(f)
-            VALID_CLIENT_KEYS = set(keys) if isinstance(keys, list) else set()
-            print(f"Successfully loaded {len(VALID_CLIENT_KEYS)} client API keys.")
-    except FileNotFoundError:
-        print("Error: client_api_keys.json not found. Client authentication will fail.")
+
+    env_keys = os.getenv("CLIENT_API_KEYS")
+    if not env_keys:
+        print(
+            "Error: CLIENT_API_KEYS environment variable not found. Client authentication will fail."
+        )
         VALID_CLIENT_KEYS = set()
+        return
+
+    try:
+        # 支持逗号分隔的多个密钥
+        keys = [key.strip() for key in env_keys.split(",") if key.strip()]
+        VALID_CLIENT_KEYS = set(keys)
+        print(
+            f"Successfully loaded {len(VALID_CLIENT_KEYS)} client API keys from environment variables."
+        )
     except Exception as e:
-        print(f"Error loading client_api_keys.json: {e}")
+        print(f"Error parsing CLIENT_API_KEYS environment variable: {e}")
         VALID_CLIENT_KEYS = set()
 
 
 def load_yupp_accounts():
-    """Load Yupp accounts from yupp.json"""
+    """Load Yupp accounts from environment variables"""
     global YUPP_ACCOUNTS
     YUPP_ACCOUNTS = []
-    try:
-        with open("yupp.json", "r", encoding="utf-8") as f:
-            accounts = json.load(f)
-            if not isinstance(accounts, list):
-                print("Warning: yupp.json should contain a list of account objects.")
-                return
 
-            for acc in accounts:
-                token = acc.get("token")
-                if token:
-                    YUPP_ACCOUNTS.append(
-                        {
-                            "token": token,
-                            "is_valid": True,
-                            "last_used": 0,
-                            "error_count": 0,
-                        }
-                    )
-            print(f"Successfully loaded {len(YUPP_ACCOUNTS)} Yupp accounts.")
-    except FileNotFoundError:
-        print("Error: yupp.json not found. API calls will fail.")
+    env_tokens = os.getenv("YUPP_TOKENS")
+    if not env_tokens:
+        print("Error: YUPP_TOKENS environment variable not found. API calls will fail.")
+        return
+
+    try:
+        # 支持逗号分隔的多个token
+        tokens = [token.strip() for token in env_tokens.split(",") if token.strip()]
+        for token in tokens:
+            YUPP_ACCOUNTS.append(
+                {
+                    "token": token,
+                    "is_valid": True,
+                    "last_used": 0,
+                    "error_count": 0,
+                }
+            )
+        print(
+            f"Successfully loaded {len(YUPP_ACCOUNTS)} Yupp accounts from environment variables."
+        )
     except Exception as e:
-        print(f"Error loading yupp.json: {e}")
+        print(f"Error parsing YUPP_TOKENS environment variable: {e}")
 
 
 def load_yupp_models():
     """Load Yupp models from model.json"""
     global YUPP_MODELS
+    model_file = os.getenv("MODEL_FILE", "model.json")
     try:
-        with open("model.json", "r", encoding="utf-8") as f:
+        with open(model_file, "r", encoding="utf-8") as f:
             YUPP_MODELS = json.load(f)
             if not isinstance(YUPP_MODELS, list):
                 YUPP_MODELS = []
-                print("Warning: model.json should contain a list of model objects.")
+                print(f"Warning: {model_file} should contain a list of model objects.")
                 return
             print(f"Successfully loaded {len(YUPP_MODELS)} models.")
     except FileNotFoundError:
-        print("Error: model.json not found. Model list will be empty.")
+        print(f"Error: {model_file} not found. Model list will be empty.")
         YUPP_MODELS = []
     except Exception as e:
-        print(f"Error loading model.json: {e}")
+        print(f"Error loading {model_file}: {e}")
         YUPP_MODELS = []
 
 
 def get_best_yupp_account() -> Optional[YuppAccount]:
     """Get the best available Yupp account using a smart selection algorithm."""
+    max_error_count = int(os.getenv("MAX_ERROR_COUNT", "3"))
+    error_cooldown = int(os.getenv("ERROR_COOLDOWN", "300"))
+
     with account_rotation_lock:
         now = time.time()
         valid_accounts = [
@@ -200,8 +220,8 @@ def get_best_yupp_account() -> Optional[YuppAccount]:
             for acc in YUPP_ACCOUNTS
             if acc["is_valid"]
             and (
-                acc["error_count"] < MAX_ERROR_COUNT
-                or now - acc["last_used"] > ERROR_COOLDOWN
+                acc["error_count"] < max_error_count
+                or now - acc["last_used"] > error_cooldown
             )
         ]
 
@@ -211,8 +231,8 @@ def get_best_yupp_account() -> Optional[YuppAccount]:
         # Reset error count for accounts that have been in cooldown
         for acc in valid_accounts:
             if (
-                acc["error_count"] >= MAX_ERROR_COUNT
-                and now - acc["last_used"] > ERROR_COOLDOWN
+                acc["error_count"] >= max_error_count
+                and now - acc["last_used"] > error_cooldown
             ):
                 acc["error_count"] = 0
 
@@ -280,22 +300,6 @@ async def authenticate_client(
         raise HTTPException(status_code=403, detail="Invalid client API key.")
 
 
-@app.on_event("startup")
-async def startup():
-    """应用启动时初始化配置"""
-    print("Starting Yupp.ai OpenAI API Adapter server...")
-    load_client_api_keys()
-    load_yupp_accounts()
-    load_yupp_models()
-    print("Server initialization completed.")
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    """应用关闭时清理资源"""
-    print("Server shutdown completed.")
-
-
 def get_models_list_response() -> ModelList:
     """Helper to construct ModelList response from cached models."""
     model_infos = [
@@ -321,15 +325,6 @@ async def list_models_no_auth():
     return get_models_list_response()
 
 
-@app.get("/debug")
-async def toggle_debug(enable: bool = Query(None)):
-    """切换调试模式"""
-    global DEBUG_MODE
-    if enable is not None:
-        DEBUG_MODE = enable
-    return {"debug_mode": DEBUG_MODE}
-
-
 def claim_yupp_reward(account: YuppAccount, reward_id: str):
     """同步领取Yupp奖励"""
     try:
@@ -342,9 +337,8 @@ def claim_yupp_reward(account: YuppAccount, reward_id: str):
             "sec-fetch-site": "same-origin",
             "Cookie": f"__Secure-yupp.session-token={account['token']}",
         }
-        response = requests.post(
-            url, json=payload, headers=headers, proxies={"http": None, "https": None}
-        )
+        session = create_requests_session()
+        response = session.post(url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
         balance = data[0]["result"]["data"]["json"]["currentCreditBalance"]
@@ -687,9 +681,7 @@ async def chat_completions(
         try:
             # 构建请求
             url_uuid = str(uuid.uuid4())
-            url = f"https://yupp.ai/chat/{url_uuid}?stream=true "
-            # url_uuid = "056511bb-b457-42b1-a064-165234cd45dc"
-            # url = f"https://yupp.ai/chat/056511bb-b457-42b1-a064-165234cd45dc"
+            url = f"https://yupp.ai/chat/{url_uuid}?stream=true"
 
             payload = [
                 url_uuid,
@@ -720,12 +712,12 @@ async def chat_completions(
             )
 
             # 发送请求
-            response = requests.post(
+            session = create_requests_session()
+            response = session.post(
                 url,
                 data=json.dumps(payload),
                 headers=headers,
                 stream=True,
-                proxies={"http": None, "https": None},
             )
             response.raise_for_status()
 
@@ -781,40 +773,31 @@ async def chat_completions(
     )
 
 
-async def error_stream_generator(error_detail: str, status_code: int):
-    """生成错误流响应"""
-    yield f'data: {json.dumps({"error": {"message": error_detail, "type": "yupp_api_error", "code": status_code}})}\n\n'
-    yield "data: [DONE]\n\n"
-
-
-if __name__ == "__main__":
+def main():
+    """主函数：启动 Yupp.ai OpenAI API Adapter 服务"""
     import uvicorn
+    from dotenv import load_dotenv
 
-    # 设置环境变量以启用调试模式
-    if os.environ.get("DEBUG_MODE", "").lower() == "true":
-        DEBUG_MODE = True
-        print("Debug mode enabled via environment variable")
+    # 加载环境变量
+    load_dotenv()
 
-    if not os.path.exists("yupp.json"):
-        print("Warning: yupp.json not found. Creating a dummy file.")
-        dummy_data = [
-            {
-                "token": "your_yupp_session_token_here",
-            }
-        ]
-        with open("yupp.json", "w", encoding="utf-8") as f:
-            json.dump(dummy_data, f, indent=4)
-        print("Created dummy yupp.json. Please replace with valid Yupp.ai data.")
+    # 设置全局配置
+    global DEBUG_MODE
+    DEBUG_MODE = os.environ.get("DEBUG_MODE", "false").lower() == "true"
 
-    if not os.path.exists("client_api_keys.json"):
-        print("Warning: client_api_keys.json not found. Creating a dummy file.")
-        dummy_key = f"sk-dummy-{uuid.uuid4().hex}"
-        with open("client_api_keys.json", "w", encoding="utf-8") as f:
-            json.dump([dummy_key], f, indent=2)
-        print(f"Created dummy client_api_keys.json with key: {dummy_key}")
+    if DEBUG_MODE:
+        print("Debug mode enabled")
 
-    if not os.path.exists("model.json"):
-        print("Warning: model.json not found. Creating a dummy file.")
+    # 检查必要的环境变量
+    if not os.getenv("CLIENT_API_KEYS"):
+        print("Warning: CLIENT_API_KEYS environment variable not set.")
+    if not os.getenv("YUPP_TOKENS"):
+        print("Warning: YUPP_TOKENS environment variable not set.")
+
+    # 检查模型文件
+    model_file = os.getenv("MODEL_FILE", "model.json")
+    if not os.path.exists(model_file):
+        print(f"Warning: {model_file} not found. Creating a dummy file.")
         dummy_models = [
             {
                 "id": "claude-3.7-sonnet:thinking",
@@ -824,27 +807,28 @@ if __name__ == "__main__":
                 "family": "Claude",
             }
         ]
-        with open("model.json", "w", encoding="utf-8") as f:
+        with open(model_file, "w", encoding="utf-8") as f:
             json.dump(dummy_models, f, indent=4)
-        print("Created dummy model.json.")
+        print(f"Created dummy {model_file}.")
 
+    # 加载配置
     load_client_api_keys()
     load_yupp_accounts()
     load_yupp_models()
 
+    # 显示启动信息
     print("\n--- Yupp.ai OpenAI API Adapter ---")
     print(f"Debug Mode: {DEBUG_MODE}")
     print("Endpoints:")
     print("  GET  /v1/models (Client API Key Auth)")
     print("  GET  /models (No Auth)")
     print("  POST /v1/chat/completions (Client API Key Auth)")
-    print("  GET  /debug?enable=[true|false] (Toggle Debug Mode)")
 
     print(f"\nClient API Keys: {len(VALID_CLIENT_KEYS)}")
     if YUPP_ACCOUNTS:
         print(f"Yupp.ai Accounts: {len(YUPP_ACCOUNTS)}")
     else:
-        print("Yupp.ai Accounts: None loaded. Check yupp.json.")
+        print("Yupp.ai Accounts: None loaded. Check YUPP_TOKENS environment variable.")
     if YUPP_MODELS:
         models = sorted([m.get("label", m.get("id", "unknown")) for m in YUPP_MODELS])
         print(f"Yupp.ai Models: {len(YUPP_MODELS)}")
@@ -852,7 +836,16 @@ if __name__ == "__main__":
             f"Available models: {', '.join(models[:5])}{'...' if len(models) > 5 else ''}"
         )
     else:
-        print("Yupp.ai Models: None loaded. Check model.json.")
+        print(f"Yupp.ai Models: None loaded. Check {model_file}.")
     print("------------------------------------")
 
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    # 启动服务器
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8001"))
+
+    print(f"Starting server on {host}:{port}")
+    uvicorn.run(app, host=host, port=port)
+
+
+if __name__ == "__main__":
+    main()

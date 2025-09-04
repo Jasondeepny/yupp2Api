@@ -3,25 +3,31 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
-    image: yupp-2api:latest  # 指定镜像名
-    container_name: yupp-2api  # 指定容器名
+    image: yupp-2api:latest
+    container_name: yupp-2api
     restart: unless-stopped
     ports:
-      - "8001:8001"
+      - "${PORT:-8001}:${PORT:-8001}"
     volumes:
-      # 挂载配置文件
-      - ./yupp.json:/app/yupp.json:ro
-      - ./client_api_keys.json:/app/client_api_keys.json:ro
-      - ./model.json:/app/model.json:ro
-      # 挂载日志目录（可选）
-      - ./logs:/app/logs
+      # 挂载模型配置文件（可配置路径）
+      - ${MODEL_FILE_PATH:-./model.json}:/app/${MODEL_FILE:-model.json}:ro
     environment:
-      - DEBUG_MODE=true
+      # 从 .env 文件加载环境变量
+      - CLIENT_API_KEYS=${CLIENT_API_KEYS}
+      - YUPP_TOKENS=${YUPP_TOKENS}
+      - HOST=${HOST:-0.0.0.0}
+      - PORT=${PORT:-8001}
+      - DEBUG_MODE=${DEBUG_MODE:-false}
+      - MAX_ERROR_COUNT=${MAX_ERROR_COUNT:-3}
+      - ERROR_COOLDOWN=${ERROR_COOLDOWN:-300}
+      - MODEL_FILE=${MODEL_FILE:-model.json}
       - PYTHONUNBUFFERED=1
-    networks:
-      - yupp-network
+      # 代理配置（可选）
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-*}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/models"]
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8001}/models"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -30,13 +36,4 @@ services:
       driver: "json-file"
       options:
         max-size: "10m"
-        max-file: "3"
-
-networks:
-  yupp-network:
-    driver: bridge
-
-# 可选：添加卷以持久化日志
-volumes:
-  logs:
-    driver: local 
+        max-file: "3" 
